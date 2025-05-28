@@ -25,6 +25,7 @@ import requests
 from spilo_commons import RW_DIR, PATRONI_CONFIG_FILE, append_extensions, \
         get_binary_version, get_bin_dir, is_valid_pg_version, write_file, write_patroni_config
 
+# NOTE(KubeBlocks): added by KubeBlocks
 from kubeblocks_hack import prepare
 
 PROVIDER_AWS = "aws"

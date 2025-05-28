@@ -326,6 +326,7 @@ GRANT EXECUTE ON FUNCTION public.pg_stat_statements_reset($RESET_ARGS) TO admin;
 done < <(psql -d "$2" -tAc 'select pg_catalog.quote_ident(datname) from pg_catalog.pg_database where datallowconn')
 ) | psql -Xd "$2"
 
+# NOTE(KubeBlocks): execute extra post init scripts
 post_init_exec_dir="$HOME/.config/patroni/post_init.d"
 if [[ -v POST_INIT_EXEC_DIR && -d "${POST_INIT_EXEC_DIR}" ]]; then
     post_init_exec_dir="${POST_INIT_EXEC_DIR}"
