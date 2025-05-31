@@ -98,6 +98,10 @@ for version in $DEB_PG_SUPPORTED_VERSIONS; do
                 "postgresql-${version}-pllua"
                 "postgresql-${version}-pgvector")
 
+        if [ "$version" -ge 14 ]; then
+            EXTRAS+=("postgresql-${version}-pg-duckdb")
+        fi
+
         if [ "$WITH_PERL" = "true" ]; then
             EXTRAS+=("postgresql-plperl-${version}")
         fi
@@ -138,7 +142,7 @@ for version in $DEB_PG_SUPPORTED_VERSIONS; do
     if [ "${TIMESCALEDB_APACHE_ONLY}" != "true" ] && [ "${TIMESCALEDB_TOOLKIT}" = "true" ]; then
         apt-get update
         if [ "$(apt-cache search --names-only "^timescaledb-toolkit-postgresql-${version}$" | wc -l)" -eq 1 ]; then
-            apt-get install "timescaledb-toolkit-postgresql-$version"
+            apt-get install -y "timescaledb-toolkit-postgresql-$version"
         else
             echo "Skipping timescaledb-toolkit-postgresql-$version as it's not found in the repository"
         fi
