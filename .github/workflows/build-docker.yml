@@ -1,0 +1,94 @@
+# GitHub Actions 工作流：构建和推送 Docker 镜像到 Docker Hub
+# 该工作流支持手动触发，用于构建 postgres-appliance Docker 镜像
+
+name: 构建和推送 Docker 镜像
+
+# 触发条件：仅支持手动触发
+on:
+  workflow_dispatch:
+
+# 定义环境变量
+env:
+  # Docker Hub 镜像仓库名称（需要根据实际情况修改）
+  DOCKER_REPOSITORY: ${{ github.repository }}
+  # Docker 镜像标签
+  IMAGE_TAG: latest
+
+jobs:
+  # 构建和推送 Docker 镜像的作业
+  build-and-push:
+    name: 构建和推送镜像
+    # 在 Ubuntu 最新版本上运行
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 第1步：检出代码仓库
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        # 获取完整的 Git 历史，用于版本标记
+        fetch-depth: 0
+    
+    # 第2步：设置 Docker Buildx（支持多平台构建）
+    - name: 设置 Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        # 启用高级功能
+        driver-opts: image=moby/buildkit:buildx-stable-1
+    
+    # 第3步：登录到 Docker Hub
+    - name: 登录 Docker Hub
+      uses: docker/login-action@v3
+      with:
+        # 使用 GitHub Secrets 中的 Docker Hub 凭据
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    # 第4步：提取元数据（标签和注释）
+    - name: 提取元数据
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        # 镜像名称
+        images: ${{ env.DOCKER_REPOSITORY }}
+        # 标签规则
+        tags: |
+          # 使用 latest 作为标签
+          type=raw,value=latest
+          # 使用分支名称作为标签
+          type=ref,event=branch
+          # 使用 Git 提交 SHA 的前7位作为标签
+          type=sha,prefix={{branch}}-,format=short
+    
+    # 第5步：构建和推送 Docker 镜像
+    - name: 构建和推送镜像
+      uses: docker/build-push-action@v5
+      with:
+        # 指定 Dockerfile 所在的上下文路径
+        context: ./postgres-appliance
+        # Dockerfile 路径
+        file: ./postgres-appliance/Dockerfile
+        # 推送到远程仓库
+        push: true
+        # 使用多平台构建（AMD64 和 ARM64）
+        platforms: linux/amd64,linux/arm64
+        # 使用从元数据步骤获取的标签
+        tags: ${{ steps.meta.outputs.tags }}
+        # 使用从元数据步骤获取的标签作为标注
+        labels: ${{ steps.meta.outputs.labels }}
+        # 构建参数使用 Dockerfile 中的默认值
+        # 启用 Docker 层缓存以加速构建
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    # 第6步：输出构建信息
+    - name: 输出构建信息
+      run: |
+        echo "🎉 Docker 镜像构建完成！"
+        echo "📋 构建信息:"
+        echo "   - 仓库: ${{ env.DOCKER_REPOSITORY }}"
+        echo "   - 标签: ${{ env.IMAGE_TAG }}"
+        echo "   - 平台: linux/amd64, linux/arm64"
+        echo ""
+        echo "🚀 镜像已推送到 Docker Hub"
+        echo "💡 拉取命令: docker pull ${{ env.DOCKER_REPOSITORY }}:${{ env.IMAGE_TAG }}"
