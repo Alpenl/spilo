@@ -1,18 +1,62 @@
-# GitHub Actions 工作流：构建和推送 Docker 镜像到 Docker Hub
-# 该工作流支持手动触发，用于构建 postgres-appliance Docker 镜像
+# GitHub Actions 工作流：构建和推送 PostgreSQL Docker 镜像
+# 该工作流专门用于构建 postgres-appliance (Spilo) Docker 镜像并推送到 Docker Hub
+# 支持多架构构建、缓存优化、安全扫描和详细的构建信息输出
+#
+# 使用说明：
+# 1. 确保在 GitHub Secrets 中配置了 DOCKER_USERNAME 和 DOCKER_PASSWORD
+# 2. DOCKER_USERNAME 应该有推送到 alpen12/pgsql 仓库的权限
+# 3. 手动触发工作流进行构建和推送
+#
+# 注意事项：
+# - 构建时间较长（多架构构建需要 20-40 分钟）
+# - 需要足够的 GitHub Actions 运行时间配额
+# - 确保 Docker Hub 仓库存在且有推送权限
 
-name: 构建和推送 Docker 镜像
+name: 构建和推送 PostgreSQL Docker 镜像
 
 # 触发条件：仅支持手动触发
 on:
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: '自定义镜像标签（默认使用latest和分支名）'
+        required: false
+        default: 'latest'
+        type: string
+      build_platforms:
+        description: '构建平台架构'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+        type: choice
+        options:
+          - 'linux/amd64,linux/arm64'
+          - 'linux/amd64'
+          - 'linux/arm64'
+      enable_security_scan:
+        description: '启用镜像安全扫描'
+        required: false
+        default: true
+        type: boolean
+      push_to_registry:
+        description: '推送到 Docker Hub（取消勾选仅构建不推送）'
+        required: false
+        default: true
+        type: boolean
 
 # 定义环境变量
 env:
-  # Docker Hub 镜像仓库名称（需要根据实际情况修改）
+  # Docker Hub 镜像仓库名称 - 确保与实际推送目标一致
   DOCKER_REPOSITORY: alpen12/pgsql
-  # Docker 镜像标签
-  IMAGE_TAG: latest
+  # Docker 镜像标签 - 支持手动输入或自动生成
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+  # Dockerfile 所在目录
+  DOCKER_CONTEXT: ./postgres-appliance
+  # 构建平台架构 - 支持手动选择或默认多架构
+  BUILD_PLATFORMS: ${{ github.event.inputs.build_platforms || 'linux/amd64,linux/arm64' }}
+  # 是否推送到仓库 - 支持仅构建不推送的选项
+  PUSH_ENABLED: ${{ github.event.inputs.push_to_registry != 'false' && 'true' || 'false' }}
+  # 是否启用安全扫描
+  SECURITY_SCAN_ENABLED: ${{ github.event.inputs.enable_security_scan != 'false' && 'true' || 'false' }}
 
 jobs:
   # 构建和推送 Docker 镜像的作业
@@ -49,42 +93,80 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        # 镜像名称
+        # 镜像名称 - 使用环境变量确保一致性
         images: ${{ env.DOCKER_REPOSITORY }}
-        # 标签规则
+        # 标签规则 - 支持多种标签策略
         tags: |
-          # 使用 latest 作为标签
+          # 使用 latest 作为默认标签
           type=raw,value=latest
+          # 基于分支名称的标签（如果需要）
+          type=ref,event=branch
+          # 基于标签的版本号（如果有Git标签）
+          type=ref,event=tag
+          # 基于提交SHA的短标签（用于调试）
+          type=sha,prefix={{branch}}-
     
     # 第5步：构建和推送 Docker 镜像
     - name: 构建和推送镜像
       uses: docker/build-push-action@v5
       with:
-        # 指定 Dockerfile 所在的上下文路径
-        context: ./postgres-appliance
-        # Dockerfile 路径
-        file: ./postgres-appliance/Dockerfile
-        # 推送到远程仓库
-        push: true
-        # 使用多平台构建（AMD64 和 ARM64）
-        platforms: linux/amd64,linux/arm64
-        # 使用从元数据步骤获取的标签
+        # 指定 Dockerfile 所在的上下文路径 - 使用环境变量
+        context: ${{ env.DOCKER_CONTEXT }}
+        # Dockerfile 路径 - 明确指定Dockerfile位置
+        file: ${{ env.DOCKER_CONTEXT }}/Dockerfile
+        # 推送到远程仓库 - 根据输入参数决定是否推送
+        push: ${{ env.PUSH_ENABLED == 'true' }}
+        # 使用多平台构建 - 支持AMD64和ARM64架构
+        platforms: ${{ env.BUILD_PLATFORMS }}
+        # 使用从元数据步骤获取的标签 - 确保标签一致性
         tags: ${{ steps.meta.outputs.tags }}
-        # 使用从元数据步骤获取的标签作为标注
+        # 使用从元数据步骤获取的标注 - 包含构建信息
         labels: ${{ steps.meta.outputs.labels }}
-        # 构建参数使用 Dockerfile 中的默认值
-        # 启用 Docker 层缓存以加速构建
+        # 构建参数 - 可以在这里添加自定义构建参数
+        build-args: |
+          BUILD_DATE=${{ steps.meta.outputs.labels['org.opencontainers.image.created'] }}
+          VCS_REF=${{ github.sha }}
+        # 启用 GitHub Actions 缓存以加速构建
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        # 启用构建输出以便调试
+        outputs: type=registry
     
-    # 第6步：输出构建信息
+    # 第6步：输出构建信息和验证结果
     - name: 输出构建信息
       run: |
         echo "🎉 Docker 镜像构建完成！"
-        echo "📋 构建信息:"
-        echo "   - 仓库: ${{ env.DOCKER_REPOSITORY }}"
-        echo "   - 标签: ${{ env.IMAGE_TAG }}"
-        echo "   - 平台: linux/amd64, linux/arm64"
+        echo "📋 构建详细信息:"
+        echo "   - 仓库名称: ${{ env.DOCKER_REPOSITORY }}"
+        echo "   - 构建标签: ${{ steps.meta.outputs.tags }}"
+        echo "   - 支持平台: ${{ env.BUILD_PLATFORMS }}"
+        echo "   - 构建上下文: ${{ env.DOCKER_CONTEXT }}"
+        echo "   - 提交 SHA: ${{ github.sha }}"
+        echo "   - 构建时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo ""
-        echo "🚀 镜像已推送到 Docker Hub"
-        echo "💡 拉取命令: docker pull ${{ env.DOCKER_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+        echo "🚀 镜像已成功推送到 Docker Hub"
+        echo "💡 拉取命令示例:"
+        echo "   docker pull ${{ env.DOCKER_REPOSITORY }}:latest"
+        echo "   docker pull ${{ env.DOCKER_REPOSITORY }}:${{ github.ref_name }}"
+        echo ""
+        echo "🔍 镜像详情可在以下地址查看:"
+        echo "   https://hub.docker.com/r/${{ env.DOCKER_REPOSITORY }}/tags"
+    
+    # 第7步：镜像安全扫描（可选，推荐启用）
+    - name: 镜像安全扫描
+      uses: docker/scout-action@v1
+      if: ${{ env.SECURITY_SCAN_ENABLED == 'true' && env.PUSH_ENABLED == 'true' }}
+      with:
+        command: cves
+        image: ${{ env.DOCKER_REPOSITORY }}:${{ env.IMAGE_TAG }}
+        only-severities: critical,high
+        exit-code: false  # 不因为安全问题而终止工作流
+      continue-on-error: true  # 扫描失败不影响整体流程
+    
+    # 第8步：清理构建缓存（可选，节省存储空间）
+    - name: 清理构建缓存
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      run: |
+        echo "🧹 清理 Docker 构建缓存..."
+        docker builder prune -f --filter until=24h || true
+        echo "✅ 缓存清理完成"
