@@ -10,7 +10,7 @@ on:
 # 定义环境变量
 env:
   # Docker Hub 镜像仓库名称（需要根据实际情况修改）
-  DOCKER_REPOSITORY: ${{ github.repository }}
+  DOCKER_REPOSITORY: alpen12/pgsql
   # Docker 镜像标签
   IMAGE_TAG: latest
 
@@ -55,10 +55,6 @@ jobs:
         tags: |
           # 使用 latest 作为标签
           type=raw,value=latest
-          # 使用分支名称作为标签
-          type=ref,event=branch
-          # 使用 Git 提交 SHA 的前7位作为标签
-          type=sha,prefix={{branch}}-,format=short
     
     # 第5步：构建和推送 Docker 镜像
     - name: 构建和推送镜像
